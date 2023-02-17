@@ -33,7 +33,7 @@ $information
     -ic=      --images-config= 
     -pc=      --pngs-config=
     -gc=      --gifs-config=
-    --mc=     ---mp4s-config=
+    -mc=     --mp4s-config=
     
     [by default, the script will run with -p -g -m options]
 "
