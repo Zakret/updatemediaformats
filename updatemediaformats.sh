@@ -1,9 +1,10 @@
 #!/bin/bash
 
 set -e
-updatebanner () {
-information="\033[1;31m! By default this script runs RECURSIVE !\033[0m
 
+# Help
+updatebanner () {
+information="
 This script update all found media files to newer more efficient formats: 
 avif for images and x265 mp4 for videos.
 
@@ -20,7 +21,7 @@ x264 with non-aac sound: $mp4aacset
 
 help() {
 echo -e "
-\033[1;33m$(basename "$0")\033[0m [-n] [-i] [-g] [-m] [-f]
+\033[1;33m$(basename "$0")\033[0m [-n] [-i] [-p] [-g] [-m] [-f] [<PATH>]
 $information
 \033[1;33mOptions\033[0m:
     -h        --help                   Show this text
@@ -33,21 +34,25 @@ $information
     -ic=      --images-config= 
     -pc=      --pngs-config=
     -gc=      --gifs-config=
-    -mc=     --mp4s-config=
+    -mc=      --mp4s-config=
     
     [by default, the script will run with -p -g -m options]
 "
 }
 
+# Variable declarations
 jpegset="-verbose -format jpg -layers Dispose -resize 3000\>x3000\> -quality 75%"
 avifset=""
-mp4muteset=" -c:v libx265 -crf 26 -preset medium -movflags +faststart"
-mp4aacset="-c:v libx265 -crf 26 -preset medium -c:a aac -b:a 128k  -movflags +faststart"
-mp4copyset="-c:v libx265 -crf 26 -preset medium -c:a copy -movflags +faststart"
+mp4muteset="-y -c:v libx265 -crf 26 -preset medium -movflags +faststart"
+mp4aacset="-y -c:v libx265 -crf 26 -preset medium -c:a aac -b:a 128k  -movflags +faststart"
+mp4copyset="-y -c:v libx265 -crf 26 -preset medium -c:a copy -movflags +faststart"
 updatebanner
+declare -i i
 chosen=()
-for i in "$@"; do
-  case $i in
+
+# Script arguments
+for k in "$@"; do
+  case $k in
     -h|--help)
       help
       exit
@@ -73,154 +78,136 @@ for i in "$@"; do
       shift
       ;;
     -ic=*|--images-config=*)
-      avifset=${i#*=}
+      avifset=${k#*=}
       shift
       ;;
     -pc=*|--pngs-config=*)
-      jpegset=${i#*=}
+      jpegset=${k#*=}
       shift
       ;;
     -gc=*|--gifs-config=*)
-      mp4muteset=${i#*=}
+      mp4muteset=${k#*=}
       shift
       ;;
     -mc=*|--mp4s-config=*)
-      mp4aacset=${i#*=}
-      mp4copyset=${i#*=}
+      mp4aacset=${k#*=}
+      mp4copyset=${k#*=}
       shift
       ;;
-    -*|--*)
-      echo "Unknown option $i"
+    -*)
+      echo "Unknown option $k"
       help
       exit 1
       ;;
     *)
+      if [ -d "$k" ];then
+        cd "$k"
+      else
+        echo "Unknown input: $k"
+        help
+        exit 1
+      fi
       ;;
   esac
 done
 
+# Information
 if [ ${#chosen[@]} -eq 0 ];then
   chosen=("pngs" "gifs" "mp4s")
 fi
 
-if ! command -v ffmpeg &> /dev/null
-then
-    echo -e "\033[0;33mffmpeg\033[0m could not be found"
-    exit 1
-fi
-
-if ! command -v magick &> /dev/null
-then
-    echo -e "\033[0;33mimagemagick\033[0m could not be found"
-    exit 1
-fi
-
-declare -i i
 updatebanner
 echo -e "
 $information
 
 Following files are going to be conversed:
-${chosen[@]}"
-read -p "Are you ready to proceed? y/N:" -N 1
-if  ! ( [ $REPLY == "y" ] || [ $REPLY == "Y" ] );then
+${chosen[*]}
+
+Script will work from this point: \033[1;33m$PWD\033[0m"
+if [ -z "$nonrecursive" ];then echo -e "\033[1;31m! RECURSIVE !\033[0m";fi
+
+# Dependency check
+depcheck() {
+  for d in "$@";do
+    if ! command -v "$d" &> /dev/null;then
+      echo -e "\033[0;33m$d\033[0m could not be found"
+      exit 3
+    fi
+  done
+}
+
+depcheck "ffmpeg" "magick" "mediainfo"
+
+# Prompt for confirmation
+read -rp "Are you ready to proceed? y/N:" -N 1
+if  ! { [ "$REPLY" == "y" ] || [ "$REPLY" == "Y" ]; };then
   echo -e '\r'
   exit
 fi
 echo -e '\r'
 
-# PNG to AVIF
-if [[ " ${chosen[*]} " =~ " pngs " ]]; then
-readarray -d '' imgslist < <(find ./ $nonrecursive -type f -iname "*.png" -print0)
-echo -e '\033[1;33m'Converted 0 from ${#imgslist[@]} images.'\033[0m'
+bathconvertion() {
+  local extensions="$1"
+  local targetextension="$2"
+  local convert="$3"
+  local conversionoptions="$4"
+  readarray -d '' fileslist < <(find "$PWD" $nonrecursive -type f -regextype posix-extended -regex "^.*\.(${extensions})$" -print0)
+  echo -e "\033[1;33mConverted 0 from ${#fileslist[@]} files to ${targetextension}.\033[0m"
 
-i=0
-for f in "${imgslist[@]}"
-do
-  newfile=$(sed -E 's/\.png$/.jpg/I' <<< "$f")
-  magick "$f" $jpegset "$newfile"
-  touch -r "$f" "$newfile"
-  rm "$f"
-  i+=1
-  echo -e '\033[1;33m'Converted $i from ${#imgslist[@]} images.'\033[0m' $f
-done
-fi
-
-#images to AVIF
-if [[ " ${chosen[*]} " =~ " images " ]]; then
-readarray -d '' imgslist < <(find ./ $nonrecursive -type f -regextype posix-extended -regex "^.*\.(jpg|jpeg|png)$" -print0)
-echo -e '\033[1;33m'Converted 0 from ${#imgslist[@]} images.'\033[0m'
-
-i=0
-for f in "${imgslist[@]}"
-do
-  newfile=$(sed -E 's/\.(jpg|jpeg|png)$/.avif/I' <<< "$f")
-  magick "$f" $avifset "$newfile"
-  touch -r "$f" "$newfile"
-  rm "$f"
-  i+=1
-  echo -e '\033[1;33m'Converted $i from ${#imgslist[@]} images.'\033[0m' $f
-done
-fi
-
-# GIF to x265
-if [[ " ${chosen[*]} " =~ " gifs " ]]; then
-readarray -d '' gifslist < <(find ./ $nonrecursive -type f  -iname "*.gif" -print0)
-echo -e '\033[1;33m'Converted 0 from ${#gifslist[@]} gifs.'\033[0m'
-
-i=0
-for f in "${gifslist[@]}"
-do
-  ffmpeg -hide_banner -i "$f" $mp4muteset  -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "$f.hevc.mp4"
-  touch -r "$f" "$f.hevc.mp4"
-  rm "$f"
-  i+=1
-  echo -e '\033[1;33m'Converted $i from ${#gifslist[@]} gifs.'\033[0m' $f
-done
-fi
-
-# x264 MP4 to x265
-if [[ " ${chosen[*]} " =~ " mp4s " ]]; then
-i=0
-echo -e '\033[1;33m'Probing videos:'\033[0m'
-# -size -100M
-readarray -d '' vidslist < <(find ./ $nonrecursive -type f -iname "*.mp4" -print0)
-for index in "${!vidslist[@]}" ; do [[ ${vidslist[$index]} =~ .hevc.mp4$ ]] && unset -v 'vidslist[$index]' ; done
-vidslist=("${vidslist[@]}")
-declare -i totaltoprobe=${#vidslist[@]}
-echo $totaltoprobe videos to probe
-declare -a vidstoconvert
-
-for v in "${vidslist[@]}"
-do
-  currentcodec=$(ffprobe -loglevel error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1  "$v")
-  if [ "$currentcodec" != "hevc" ]; then
-    vidstoconvert+=("$v")
-  fi
-  i+=1
-  echo -ne "$(( i*100/totaltoprobe ))%\r"
-done
-echo -e '\033[1;33m'Converted 0 from ${#vidstoconvert[@]} videos.'\033[0m'
-
-i=0
-for f in "${vidstoconvert[@]}"
-do
-  newfile=$(sed -E 's/\.mp4$/.hevc.mp4/I' <<< "$f")
-  audioformat=$(ffprobe -loglevel error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1  "$f")
-  if [ "$audioformat" = "aac" ]; then
-    ffmpeg -hide_banner -i "$f" $mp4copyset "$newfile"
+  i=0
+  for f in "${fileslist[@]}"
+  do
+    newfile=$(sed -E "s/\.(${extensions})$/.${targetextension}/I" <<< "${f}")
+    ($convert "$f" "$conversionoptions" "$newfile" ) || continue
     touch -r "$f" "$newfile"
     rm "$f"
+    i+=1
+    echo -e "\033[1;33mConverted $i from ${#fileslist[@]} files to ${targetextension}.\033[0m $f"
+  done
+}
+
+imgconversion() {
+  magick "$1" $2 "$3"
+}
+
+gifconversion() {
+  ffmpeg -hide_banner -i "$1" $2  -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "$3"
+}
+
+mp4conversion() {
+  local currentcodec
+  local audioformat
+  currentcodec=$(mediainfo --Output='Video;%Format%' "$1")
+  if [ "$currentcodec" = "HEVC" ]; then
+    return 1
+  fi
+  audioformat=$(mediainfo --Output='Audio;%Format%' "$1")
+  readarray -d '' setarray < <(echo -e "$2")
+  if [ "$audioformat" = "AAC" ]; then
+    ffmpeg -hide_banner -i "$1" ${setarray[1]} "$3" || { rm "$3"; return 1; }
   elif [ -z "$audioformat" ]; then
-    ffmpeg -hide_banner -i "$f" $mp4muteset "$newfile"
-    touch -r "$f" "$newfile"
-    rm "$f"
+    ffmpeg -hide_banner -i "$1" ${setarray[2]} "$3" || { rm "$3"; return 1; }
   else
-    ffmpeg -hide_banner -i "$f" $mp4aacset "$newfile"
-    touch -r "$f" "$newfile"
-    rm "$f"
+    ffmpeg -hide_banner -i "$1" ${setarray[0]} "$3" || { rm "$3"; return 1; }
   fi
-  i+=1
-  echo -e '\033[1;33m'Converted $i from ${#vidstoconvert[@]} videos.'\033[0m' $f
+}
+
+for c in "${chosen[@]}"; do
+  case "$c" in
+    pngs)
+    bathconvertion "png" "jpg" imgconversion "$jpegset"
+    ;;
+    images)
+    bathconvertion "jpg|jpeg|png" "avif" imgconversion "$avifset"
+    ;;
+    gifs)
+    bathconvertion "gif" "gif.hevc.mp4" gifconversion "$mp4muteset"
+    ;;
+    mp4s)
+    nonrecursive+=" -type f -name *.hevc.mp4 -prune -o"
+    mp4set="$mp4aacset\0$mp4copyset\0$mp4muteset"
+    bathconvertion "mp4|m4v" "hevc.mp4" mp4conversion "$mp4set"
+    ;;
+  esac
 done
-fi
+
